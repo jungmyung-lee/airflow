@@ -1,0 +1,86 @@
+dataset: customer_care_emails
+
+# thread_id repeats across emails in the same thread.
+# This composite key is unique in the provided CSV.
+primary_key:
+  - thread_id
+  - timestamp
+  - subject
+
+columns:
+  - name: subject
+    type: string
+    nullable: false
+
+  - name: sender
+    type: string
+    nullable: false
+
+  - name: receiver
+    type: string
+    nullable: false
+
+  - name: timestamp
+    type: timestamp
+    nullable: false
+    timezone: UTC
+    parse_format: mixed
+
+  - name: message_body
+    type: string
+    nullable: false
+
+  - name: thread_id
+    type: string
+    nullable: false
+
+  - name: email_types
+    type: string
+    nullable: false
+    description: "CSV-encoded list-like value; keep as text in Stage 1."
+
+  - name: email_status
+    type: string
+    nullable: false
+    allowed_values:
+      - ongoing
+      - completed
+
+  - name: email_criticality
+    type: string
+    nullable: false
+    allowed_values:
+      - low
+      - medium
+      - high
+
+  - name: product_types
+    type: string
+    nullable: false
+    description: "CSV-encoded list-like value; keep as text in Stage 1."
+
+  - name: agent_effectivity
+    type: string
+    nullable: false
+    allowed_values:
+      - very low
+      - low
+      - medium
+      - high
+      - very high
+
+  - name: agent_efficiency
+    type: string
+    nullable: false
+    allowed_values:
+      - very low
+      - low
+      - medium
+      - high
+      - very high
+
+  - name: customer_satisfaction
+    type: float
+    nullable: false
+    minimum: -1.0
+    maximum: 1.0
