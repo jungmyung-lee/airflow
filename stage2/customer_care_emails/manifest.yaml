@@ -1,0 +1,29 @@
+dataset_name: customer_care_emails
+
+source:
+  platform: Hugging Face
+  repository: rtweera/customer_care_emails
+  file: customer_care_emails.csv
+  generated_with: Google Gemini Pro
+
+owner: Ravindu Weerasinghe
+license: GPL-3.0
+language: en
+
+# Task Bank dataset-list entry selected for this project.
+dataset_code: 102
+status: "Completed/Completed"
+
+# The Task Bank also contains the same dataset under code 129.
+alternate_entries:
+  - dataset_code: 129
+    status: "Done"
+
+target:
+  system: MinIO
+  format: parquet
+  bucket: customer-care-emails
+
+notes:
+  - "Synthetic customer-care email dataset."
+  - "The CSV contains multiple emails per thread, so thread_id is not a row-level primary key."
