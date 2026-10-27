@@ -67,6 +67,11 @@ x-airflow-common:
     AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW__API_AUTH__JWT_SECRET:-airflow_jwt_secret}
     AIRFLOW__API_AUTH__JWT_ISSUER: ${AIRFLOW__API_AUTH__JWT_ISSUER:-airflow}
     AIRFLOW_CONN_TARGET_POSTGRES: postgresql://${TARGET_POSTGRES_USER}:${TARGET_POSTGRES_PASSWORD}@target-postgres:5432/${TARGET_POSTGRES_DB}
+        # MinIO settings used by the Stage 2 DAG (values come from .env)
+    MINIO_ENDPOINT_URL: http://minio:9000
+    MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+    MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+    MINIO_BUCKET: customer-care-emails
     # yamllint disable rule:line-length
     # Use simple http server on scheduler for health checks
     # See https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/logging-monitoring/check-health.html#scheduler-health-check-server
@@ -80,6 +85,8 @@ x-airflow-common:
   volumes:
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
     - ${AIRFLOW_PROJ_DIR:-.}/stage1/customer_care_emails:/opt/airflow/data/customer_care_emails
+    # Stage 2 schema contract and manifest (read by the DAG)
+    - ${AIRFLOW_PROJ_DIR:-.}/stage2/customer_care_emails:/opt/airflow/contracts/customer_care_emails
     - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
     - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
     - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
