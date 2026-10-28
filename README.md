@@ -873,3 +873,101 @@ Story 4 — Documentation and runbook               Complete
 ```
 
 The Stage 1 pipeline is now reproducible from Docker Compose and ready for review.
+
+---
+
+# Stage 2 — Local CSV to Partitioned Parquet in MinIO
+
+## Overview
+
+Stage 2 reuses the Stage 1 dataset (`customer_care_emails`) but lands it in MinIO as partitioned Parquet instead of PostgreSQL. The DAG validates the CSV against a schema contract and fails before writing anything if the CSV does not conform.
+
+```text
+customer_care_emails.csv
+        |
+        v
+validate_contract  ->  transform  ->  write_parquet_to_minio
+(schema_contract.yaml)   (cast types,    (one Parquet file per date)
+ FAIL on mismatch         add email_date)        |
+                                                 v
+                              MinIO bucket: customer-care-emails
+                              customer_care_emails/email_date=YYYY-MM-DD/part-0.parquet
+```
+
+## Stage 2 Files
+
+| Path | Purpose |
+|---|---|
+| `stage2/customer_care_emails/manifest.yaml` | Dataset name, source, owner, status, target |
+| `stage2/customer_care_emails/schema_contract.yaml` | Contract enforced at runtime (columns, types, nullability, allowed values, ranges, primary key) |
+| `dags/csv_to_parquet_minio.py` | The Stage 2 DAG |
+| `docker-compose.yaml` | Adds the `minio` and `minio-init` services and passes MinIO settings to Airflow |
+| `.env.example` | Placeholders for MinIO credentials |
+
+## Stage 2 Configuration
+
+Add the MinIO credentials to your real `.env` (never commit it):
+
+```text
+MINIO_ROOT_USER=your_minio_user
+MINIO_ROOT_PASSWORD=your_minio_password
+```
+
+`docker-compose.yaml` passes them to Airflow as `MINIO_ENDPOINT_URL`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY` and `MINIO_BUCKET`. The DAG reads these from environment variables, so no credentials are stored in code.
+
+## Stage 2 Run Steps
+
+1. Start the stack:
+
+   ```bash
+   docker compose up -d
+   ```
+
+   The `minio-init` container creates the `customer-care-emails` bucket and exits with code 0.
+
+2. Open the Airflow UI at `http://localhost:8080`, un-pause `csv_to_parquet_minio`, and click Trigger.
+
+3. All three tasks (`validate_contract`, `transform`, `write_parquet_to_minio`) should turn green.
+
+4. Open the MinIO console at `http://localhost:9001`, log in with the MinIO credentials from `.env`, and browse `customer-care-emails/customer_care_emails/`. Each `email_date=YYYY-MM-DD` folder contains `part-0.parquet`.
+
+To list the objects from the command line:
+
+```bash
+docker run --rm --network airflow_default \
+  -e MC_HOST_local=http://<user>:<password>@minio:9000 \
+  cgr.dev/chainguard/minio-client:latest ls --recursive local/customer-care-emails
+```
+
+## Stage 2 Tests
+
+**Idempotency.** Trigger the DAG a second time. The DAG deletes the previous objects under `customer_care_emails/` before writing, so the object count and total size stay the same (24 objects, about 767 KiB for this dataset).
+
+**Schema contract failure.** Create a copy of the CSV with a renamed column and run the validation task against it. Nothing is written to MinIO:
+
+```bash
+docker compose exec airflow-worker bash -c "sed '1s/thread_id/threadid/' /opt/airflow/data/customer_care_emails/customer_care_emails.csv > /tmp/broken.csv"
+
+docker compose exec -e STAGE2_CSV_PATH=/tmp/broken.csv airflow-worker python -c "
+import sys; sys.path.insert(0, '/opt/airflow/dags')
+import csv_to_parquet_minio as m
+m.validate_contract_task()
+"
+```
+
+Expected result:
+
+```text
+AirflowFailException: Schema contract violated for /tmp/broken.csv:
+ - Missing columns: ['thread_id']
+ - Unexpected columns: ['threadid']
+```
+
+The contract also rejects extra columns, empty values in non-nullable columns, invalid timestamps, non-numeric or out-of-range numbers, values outside `allowed_values`, duplicate primary keys, and structurally broken CSV files.
+
+## Stage 2 Notes
+
+- **MinIO image.** The task document references `minio/minio`, but that image can no longer be pulled from Docker Hub (access denied), and the Quay release tags require authentication. This project uses the publicly available Chainguard images `cgr.dev/chainguard/minio` and `cgr.dev/chainguard/minio-client` instead.
+- **Distroless client image.** The Chainguard `minio-client` image has no shell, so `minio-init` uses the `MC_HOST_local` environment variable and runs `mc mb --ignore-existing` directly.
+- **Partitioning.** Data is partitioned by `email_date`, derived from the UTC `timestamp` column.
+- **Airflow version.** The stack runs Airflow 3.3.2, so the DAG imports `DAG` from `airflow.sdk`.
