@@ -153,31 +153,6 @@ services:
       - --ignore-existing
       - local/customer-care-emails
 
-  clickhouse:
-    # ClickHouse is the warehouse for the Stage 3 medallion layers (bronze / silver / gold)
-    image: clickhouse/clickhouse-server:24.8
-    environment:
-      CLICKHOUSE_DB: ${CLICKHOUSE_DB}
-      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
-      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
-    ports:
-      # 8123 = HTTP interface; host port 9002 maps to the native port 9000 (host 9000 is used by MinIO)
-      - "8123:8123"
-      - "9002:9000"
-    volumes:
-      - clickhouse-data:/var/lib/clickhouse
-    ulimits:
-      nofile:
-        soft: 262144
-        hard: 262144
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: always
-
   redis:
     # Redis is limited to 7.2-bookworm due to licencing change
     # https://redis.io/blog/redis-adopts-dual-source-available-licensing/
@@ -410,4 +385,3 @@ volumes:
   postgres-db-volume:
   target-postgres-db-volume:
   minio-data:
-  clickhouse-data:
