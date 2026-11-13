@@ -1,0 +1,5 @@
+# Only needed to run the unit tests on your own machine (the Docker stack does not need this).
+pytest
+pandas
+pyarrow
+pyyaml
