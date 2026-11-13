@@ -567,6 +567,60 @@ def load_to_postgres():
 
 
 # =========================================================
+# Task 5: data_quality_check (runs AFTER the load)
+# =========================================================
+
+def data_quality_check():
+    """
+    Check the rows that actually landed in PostgreSQL.
+
+    error checks fail the DAG run, warn checks are only logged.
+    See "Data quality checks" in the README.
+    """
+    from dq_checks import CheckResult, check_equal, check_zero, report
+
+    hook = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
+    t = f'"{TARGET_TABLE}"'
+
+    def one(sql):
+        return hook.get_first(sql)[0]
+
+    expected_rows = len(pd.read_csv(CSV_PATH))
+    results = [
+        check_equal("row_count_matches_csv", expected_rows, one(f"SELECT COUNT(*) FROM {t}")),
+        check_zero(
+            "duplicate_primary_keys",
+            one(
+                f'SELECT COUNT(*) FROM (SELECT 1 FROM {t} '
+                f'GROUP BY thread_id, "timestamp", subject HAVING COUNT(*) > 1) d'
+            ),
+        ),
+        check_zero(
+            "null_key_columns",
+            one(
+                f'SELECT COUNT(*) FROM {t} '
+                f'WHERE thread_id IS NULL OR subject IS NULL OR "timestamp" IS NULL'
+            ),
+        ),
+        check_zero(
+            "satisfaction_out_of_range",
+            one(f"SELECT COUNT(*) FROM {t} WHERE customer_satisfaction NOT BETWEEN -1.0 AND 1.0"),
+        ),
+        # Business-meaning check, deliberately only a warning: a thread can legitimately go
+        # from "ongoing" to "completed", so differing statuses inside a thread are a hint, not a defect.
+        check_zero(
+            "thread_status_varies",
+            one(
+                f"SELECT COUNT(*) FROM (SELECT 1 FROM {t} "
+                f"GROUP BY thread_id HAVING COUNT(DISTINCT email_status) > 1) d"
+            ),
+            severity="warn",
+        ),
+    ]
+    report(results)
+
+
+# =========================================================
 # DAG
 # =========================================================
 
@@ -607,9 +661,15 @@ with DAG(
         python_callable=load_to_postgres,
     )
 
+    data_quality_check_task = PythonOperator(
+        task_id="data_quality_check",
+        python_callable=data_quality_check,
+    )
+
     (
         read_csv_task
         >> validate_schema_task
         >> transform_task
         >> load_to_postgres_task
+        >> data_quality_check_task
     )
