@@ -233,6 +233,34 @@ def write_parquet_to_minio_task(ti):
     print(f"Wrote {len(parts)} partition file(s) to s3://{bucket}/{DATASET}/")
 
 
+def data_quality_check_task():
+    """Read the Parquet files back from MinIO and reconcile them with the source CSV."""
+    import boto3
+
+    import pyarrow.parquet as pq
+    from dq_checks import compare_partitions, report
+
+    contract = load_contract(CONTRACT_PATH)
+    source = transform_frame(read_csv_as_text(CSV_PATH), contract)
+    expected = {k: int(v) for k, v in source.groupby(PARTITION_COL).size().items()}
+
+    bucket = os.environ["MINIO_BUCKET"]
+    s3 = boto3.client(
+        "s3",
+        endpoint_url=os.environ["MINIO_ENDPOINT_URL"],
+        aws_access_key_id=os.environ["MINIO_ACCESS_KEY"],
+        aws_secret_access_key=os.environ["MINIO_SECRET_KEY"],
+        region_name="us-east-1",
+    )
+    actual: dict[str, int] = {}
+    for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=f"{DATASET}/"):
+        for obj in page.get("Contents", []):
+            part = obj["Key"].split(f"{PARTITION_COL}=")[1].split("/")[0]
+            body = s3.get_object(Bucket=bucket, Key=obj["Key"])["Body"].read()
+            actual[part] = actual.get(part, 0) + pq.read_table(io.BytesIO(body)).num_rows
+    report(compare_partitions(expected, actual))
+
+
 # --------------------------------------------------------------------------- #
 # DAG                                                                          #
 # --------------------------------------------------------------------------- #
@@ -256,4 +284,8 @@ with DAG(
         task_id="write_parquet_to_minio", python_callable=write_parquet_to_minio_task
     )
 
-    validate_contract >> transform >> write_parquet_to_minio
+    data_quality_check = PythonOperator(
+        task_id="data_quality_check", python_callable=data_quality_check_task
+    )
+
+    validate_contract >> transform >> write_parquet_to_minio >> data_quality_check
