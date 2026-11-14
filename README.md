@@ -979,7 +979,7 @@ What is covered:
 
 | File | Business rules tested |
 |---|---|
-| `tests/test_stage1_rules.py` | Manifest status gate: a status passes when its last part is `Completed` or `Done`, in any letter case (for example `Completed`, `done`, `Pending/Completed`); `pending`, `Completed/Pending`, a missing status and an empty CSV stop the run. `schema.yaml` validation: renamed column, value outside the allowed list, `customer_satisfaction` out of range, duplicate composite key. |
+| `tests/test_stage1_rules.py` | Manifest status gate: a status passes when its last part is `Completed` or `Done`, in any letter case (for example `Completed`, `done`, `Pending/Completed`); `pending`, `Completed/Pending`, a missing status and an empty CSV stop the run. `schema.yaml` validation: renamed column, value outside the allowed list, `customer_satisfaction` out of range, duplicate composite key. Transform steps: spaces are stripped, timestamps are written in UTC (a `-05:00` time can land on the next UTC day) and no rows are lost. |
 | `tests/test_stage2_contract.py` | The real dataset satisfies the contract (2259 rows). Missing / renamed / extra columns, empty and whitespace-only values, bad and mixed timestamp formats, `customer_satisfaction` boundaries (`-1.0` and `1.0` pass, `±1.01` fail), case-sensitive allowed values, duplicate keys (and the same thread with a different timestamp is **not** a duplicate). Type casting, UTC-based `email_date` partition (a `23:30-05:00` timestamp lands on the next UTC day), input not mutated, one Parquet file per day with no rows lost. |
 | `tests/test_dq_checks.py` | The data-quality helpers: pass/fail results, error vs warning severity, a lost row, a missing partition and an unexpected partition are all detected. |
 
