@@ -71,8 +71,6 @@ The DAG is designed to be idempotent. Re-running the pipeline does not create du
 
 ## Dataset
 
-Business users: see the [data dictionary](docs/customer_care_emails_data_dictionary.xlsx).
-
 Dataset:
 
 ```text
