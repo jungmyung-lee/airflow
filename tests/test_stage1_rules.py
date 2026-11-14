@@ -37,8 +37,8 @@ def edit_csv(workdir, old, new):
 
 
 # ----------------------------------------------------------- status gate (read_csv)
-def test_ready_statuses_are_exactly_the_two_documented_values():
-    assert s1.READY_STATUSES == {"Completed/Completed", "Done"}
+def test_ready_words_are_completed_and_done():
+    assert s1.READY_WORDS == {"completed", "done"}
 
 
 def test_completed_status_is_accepted(workdir):
@@ -51,7 +51,32 @@ def test_done_status_is_accepted(workdir):
     assert s1.read_csv()["status"] == "Done"
 
 
-@pytest.mark.parametrize("status", ["pending", "Pending", "In progress", "Draft"])
+@pytest.mark.parametrize(
+    "status",
+    [
+        "completed/completed",
+        "COMPLETED/COMPLETED",
+        "  Completed/Completed  ",
+        "done",
+        "DONE",
+        " Done ",
+        "Completed",
+        "Done/Completed",
+        "Done/Done",
+        "Completed / Done",
+        "Pending/Completed",
+        "pending/DONE",
+    ],
+)
+def test_ready_statuses_ignore_case_spaces_and_use_the_last_part(workdir, status):
+    set_status(workdir, status)
+    assert s1.read_csv()["rows"] == 2259
+
+
+@pytest.mark.parametrize(
+    "status",
+    ["pending", "Pending", "In progress", "Draft", "Completed/Pending", "Done/pending", "Completed/", "/"],
+)
 def test_not_ready_status_stops_the_pipeline(workdir, status):
     set_status(workdir, status)
     with pytest.raises(ValueError, match="not ready for ingestion"):

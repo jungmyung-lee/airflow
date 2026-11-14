@@ -27,10 +27,17 @@ TRANSFORMED_CSV_PATH = (
 POSTGRES_CONN_ID = "target_postgres"
 TARGET_TABLE = "customer_care_emails"
 
-READY_STATUSES = {
-    "Completed/Completed",
-    "Done",
-}
+# A dataset status may be one word ("Done") or two words separated by "/" for the
+# first and second analysis ("Pending/Completed"). The LAST word is the current state:
+# the dataset is ready only when it is one of these words. Letter case and surrounding
+# spaces are ignored.
+READY_WORDS = {"completed", "done"}
+
+
+def is_ready_status(value) -> bool:
+    last_part = str(value).split("/")[-1].strip().casefold()
+    return last_part in READY_WORDS
+
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +67,7 @@ def read_csv():
             "manifest.yaml does not contain a dataset status."
         )
 
-    if status not in READY_STATUSES:
+    if not is_ready_status(status):
         raise ValueError(
             f"Dataset status '{status}' is not ready for ingestion."
         )
