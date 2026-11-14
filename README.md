@@ -4,7 +4,7 @@ This single README documents **two stages that share one repository, one Docker 
 
 | Part | What it does | Where to read |
 |---|---|---|
-| **Stage 1** | CSV → validate → transform → load into PostgreSQL | [Stage 1 — Local CSV to PostgreSQL with Apache Airflow](#stage-1--local-csv-to-postgresql-with-apache-airflow) (sections 1–14) |
+| **Stage 1** | CSV → validate → transform → load into PostgreSQL | [Stage 1 — Local CSV to PostgreSQL with Apache Airflow](#stage-1--local-csv-to-postgresql-with-apache-airflow) (sections 1–15) |
 | **Stage 2** | CSV → schema contract → partitioned Parquet in MinIO | [Stage 2 — Local CSV to Partitioned Parquet in MinIO](#stage-2--local-csv-to-partitioned-parquet-in-minio) |
 | **Both** | Unit tests, in-pipeline data-quality checks, assumptions | [Testing and data quality (Stage 1 and Stage 2)](#testing-and-data-quality-stage-1-and-stage-2) |
 
@@ -405,13 +405,8 @@ manifest.yaml
 ```
 
 The task verifies that the dataset status is ready for processing.
-
-Accepted statuses currently include:
-
-```text
-Completed/Completed
-Done
-```
+ 
+The dataset status is read from `manifest.yaml`. It can be one word (`Done`) or two words for the first and second review (`Pending/Completed`, `Completed/Completed`). The last word is the current state: the dataset is ready only when it is `Completed` or `Done`. Letter case and surrounding spaces are ignored. Anything else, for example `pending` or `Completed/Pending`, stops the run before the CSV is read.
 
 ### `validate_schema`
 
@@ -728,6 +723,24 @@ target-postgres
 
 ---
 
+## 15. Files That Are Not Committed
+
+Some files are created by Airflow, by Python, or by the pipeline itself while it runs. They are listed in `.gitignore` and are not part of the repository.
+
+| File or folder | Why it is not committed |
+|---|---|
+| `.env` | Holds real passwords and keys. Only `.env.example` is committed. |
+| `logs/` | Airflow task logs, created on every run. |
+| `config/` | Airflow runtime configuration created by Docker. |
+| `stage1/customer_care_emails/customer_care_emails_cleaned.csv` | A cleaned copy that the pipeline creates when it runs. |
+| `venv/`, `.venv/` | Local Python environments. |
+| `__pycache__/`, `*.pyc`, `.pytest_cache/` | Python and pytest caches. |
+| `.DS_Store` | macOS folder metadata. |
+
+**Malformed test CSV files are not committed either.** The failure tests in section 10 and in "Stage 2 Tests" use temporary malformed copies of the dataset (for example a CSV with a missing or renamed column). These copies exist only on the machine or container where the test is run and are never pushed to GitHub. To repeat a failure test, create the broken copy by following those sections.
+
+---
+
 ## Troubleshooting
 
 ### DAG does not appear in Airflow
@@ -966,7 +979,7 @@ What is covered:
 
 | File | Business rules tested |
 |---|---|
-| `tests/test_stage1_rules.py` | Manifest status gate: `Completed/Completed` and `Done` pass; `pending`, other statuses, a missing status and an empty CSV stop the run. `schema.yaml` validation: renamed column, value outside the allowed list, `customer_satisfaction` out of range, duplicate composite key. |
+| `tests/test_stage1_rules.py` | Manifest status gate: a status passes when its last part is `Completed` or `Done`, in any letter case (for example `Completed`, `done`, `Pending/Completed`); `pending`, `Completed/Pending`, a missing status and an empty CSV stop the run. `schema.yaml` validation: renamed column, value outside the allowed list, `customer_satisfaction` out of range, duplicate composite key. |
 | `tests/test_stage2_contract.py` | The real dataset satisfies the contract (2259 rows). Missing / renamed / extra columns, empty and whitespace-only values, bad and mixed timestamp formats, `customer_satisfaction` boundaries (`-1.0` and `1.0` pass, `±1.01` fail), case-sensitive allowed values, duplicate keys (and the same thread with a different timestamp is **not** a duplicate). Type casting, UTC-based `email_date` partition (a `23:30-05:00` timestamp lands on the next UTC day), input not mutated, one Parquet file per day with no rows lost. |
 | `tests/test_dq_checks.py` | The data-quality helpers: pass/fail results, error vs warning severity, a lost row, a missing partition and an unexpected partition are all detected. |
 
@@ -1012,7 +1025,7 @@ The task reads every Parquet file back from MinIO and compares it with the CSV:
 
 These are decisions made where the Task Bank text left room for interpretation. They are listed so a reviewer can disagree with them.
 
-1. **Dataset status gate.** `manifest.yaml` records `status: "Completed/Completed"`. The `read_csv` task only accepts the statuses in `READY_STATUSES` (`Completed/Completed`, `Done`) and raises an error for anything else (for example `pending`), so a dataset that is not finished is never ingested. The Task Bank text does not define exactly which statuses count as "ready"; this list is an assumption. *Open question for the mentor: should other statuses be accepted?*
+1. **Dataset status gate.** `manifest.yaml` records `status: "Completed/Completed"`. We read a two-part status as the first and second review, so the last part is the current state. The `read_csv` task accepts a dataset only when that last part (after the final `/`) is `Completed` or `Done`, ignoring letter case and spaces, and raises an error for anything else (for example `pending` or `Completed/Pending`) before the CSV is read. Column names and the allowed values inside columns are still compared exactly.
 2. **Two Task Bank entries for one dataset.** The dataset appears under code `102` (`Completed/Completed`) and code `129` (`Done`). Both are recorded in `manifest.yaml` (`dataset_code` and `alternate_entries`) and both status values are accepted. The two entries are treated as the same dataset.
 3. **Row identity.** `thread_id` alone is not unique (a thread has several emails). The primary key is the composite `(thread_id, timestamp, subject)`; it has no duplicates in the 2259 rows.
 4. **Timestamps.** The CSV mixes several timestamp formats (`parse_format: mixed`). All values are converted to UTC, and the Stage 2 partition `email_date` is the **UTC** date.
@@ -1111,6 +1124,8 @@ AirflowFailException: Schema contract violated for /tmp/broken.csv:
  - Missing columns: ['thread_id']
  - Unexpected columns: ['threadid']
 ```
+
+The broken CSV above is created only inside the container's `/tmp` for the test and is never committed to the repository. (For your reference)
 
 The contract also rejects extra columns, empty values in non-nullable columns, invalid timestamps, non-numeric or out-of-range numbers, values outside `allowed_values`, duplicate primary keys, and structurally broken CSV files.
 
