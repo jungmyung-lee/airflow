@@ -5,6 +5,7 @@ at a temporary folder holding a copy of the real files (no Docker needed).
 """
 import shutil
 
+import pandas as pd
 import pytest
 
 import load_customer_care_emails_to_postgres as s1
@@ -20,6 +21,7 @@ def workdir(tmp_path, monkeypatch):
     monkeypatch.setattr(s1, "SCHEMA_PATH", tmp_path / "schema.yaml")
     monkeypatch.setattr(s1, "MANIFEST_PATH", tmp_path / "manifest.yaml")
     monkeypatch.setattr(s1, "DDL_PATH", tmp_path / "ddl.sql")
+    monkeypatch.setattr(s1, "TRANSFORMED_CSV_PATH", tmp_path / "customer_care_emails_cleaned.csv")
     return tmp_path
 
 
@@ -133,3 +135,39 @@ def test_renamed_column_fails_validation(workdir):
     df.to_csv(workdir / "customer_care_emails.csv", index=False)
     with pytest.raises(ValueError):
         s1.validate_schema()
+
+
+# ----------------------------------------------------------- transform helpers
+def test_clean_text_columns_strips_surrounding_spaces():
+    df = pd.DataFrame({column: ["  value  "] for column in s1.TEXT_COLUMNS})
+    cleaned = s1.clean_text_columns(df)
+    assert all(cleaned[column][0] == "value" for column in s1.TEXT_COLUMNS)
+
+
+@pytest.mark.parametrize(
+    "written, expected",
+    [
+        ("2023-10-26 10:02:34+00:00", "2023-10-26T10:02:34.000000Z"),
+        ("2023-10-26 10:02:34+09:00", "2023-10-26T01:02:34.000000Z"),  # Seoul -> UTC
+        ("2023-10-26T23:30:00-05:00", "2023-10-27T04:30:00.000000Z"),  # lands on the next UTC day
+    ],
+)
+def test_timestamps_are_written_in_utc(written, expected):
+    df = pd.DataFrame({"timestamp": [written]})
+    assert s1.convert_timestamps_to_utc(df)["timestamp"][0] == expected
+
+
+def test_transform_keeps_all_rows_and_numeric_satisfaction(workdir):
+    path = s1.transform()
+    cleaned = pd.read_csv(path)
+    assert len(cleaned) == 2259
+    assert cleaned["customer_satisfaction"].dtype.kind == "f"
+    assert cleaned["timestamp"].str.endswith("Z").all()
+
+
+def test_dataframe_to_rows_turns_timestamps_into_datetimes(workdir):
+    s1.transform()
+    rows = s1.dataframe_to_rows(s1.read_transformed_csv())
+    assert len(rows) == 2259
+    assert len(rows[0]) == len(s1.LOAD_COLUMNS)
+    assert hasattr(rows[0][s1.LOAD_COLUMNS.index("timestamp")], "isoformat")

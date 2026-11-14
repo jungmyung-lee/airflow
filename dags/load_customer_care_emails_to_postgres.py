@@ -106,32 +106,8 @@ def read_csv():
 # Task 2: validate_schema
 # =========================================================
 
-def validate_schema():
-    """
-    Validate customer_care_emails.csv
-    against schema.yaml.
-
-    Checks:
-    - columns
-    - nullable rules
-    - timestamp format
-    - numeric values
-    - allowed values
-    - composite primary key uniqueness
-    """
-
-    df = pd.read_csv(CSV_PATH)
-
-    with open(
-        SCHEMA_PATH,
-        "r",
-        encoding="utf-8",
-    ) as file:
-        schema = yaml.safe_load(file)
-
-    # -----------------------------------------------------
-    # 1. Column validation
-    # -----------------------------------------------------
+def check_columns(df, schema):
+    """The CSV must have exactly the columns of schema.yaml, in the same order."""
 
     expected_columns = [
         column["name"]
@@ -147,9 +123,9 @@ def validate_schema():
             f"Actual:   {actual_columns}"
         )
 
-    # -----------------------------------------------------
-    # 2. Nullable validation
-    # -----------------------------------------------------
+
+def check_nulls(df, schema):
+    """Columns with nullable=false must not contain empty values."""
 
     for column_definition in schema["columns"]:
 
@@ -176,125 +152,140 @@ def validate_schema():
                     f"but nullable=false."
                 )
 
-    # -----------------------------------------------------
-    # 3. Type and value validation
-    # -----------------------------------------------------
 
-    for column_definition in schema["columns"]:
+def check_timestamp_column(df, column_name):
+    """Every value must be a real date and time."""
 
-        column_name = column_definition["name"]
+    try:
 
-        column_type = column_definition.get(
-            "type"
+        pd.to_datetime(
+            df[column_name],
+            format="mixed",
+            utc=True,
+            errors="raise",
         )
 
-        # -----------------------------
-        # Timestamp validation
-        # -----------------------------
+    except Exception as error:
 
-        if column_type == "timestamp":
+        raise ValueError(
+            f"Column '{column_name}' "
+            "contains an invalid timestamp."
+        ) from error
 
-            try:
 
-                pd.to_datetime(
-                    df[column_name],
-                    format="mixed",
-                    utc=True,
-                    errors="raise",
-                )
+def check_float_column(df, column_definition):
+    """Every value must be a number inside the minimum / maximum limits."""
 
-            except Exception as error:
+    column_name = column_definition["name"]
 
-                raise ValueError(
-                    f"Column '{column_name}' "
-                    "contains an invalid timestamp."
-                ) from error
+    try:
 
-        # -----------------------------
-        # Float validation
-        # -----------------------------
-
-        elif column_type == "float":
-
-            try:
-
-                numeric_values = pd.to_numeric(
-                    df[column_name],
-                    errors="raise",
-                )
-
-            except Exception as error:
-
-                raise ValueError(
-                    f"Column '{column_name}' "
-                    "contains a non-numeric value."
-                ) from error
-
-            minimum = column_definition.get(
-                "minimum"
-            )
-
-            maximum = column_definition.get(
-                "maximum"
-            )
-
-            if minimum is not None:
-
-                if (
-                    numeric_values < minimum
-                ).any():
-
-                    raise ValueError(
-                        f"Column '{column_name}' "
-                        f"contains a value below "
-                        f"minimum {minimum}."
-                    )
-
-            if maximum is not None:
-
-                if (
-                    numeric_values > maximum
-                ).any():
-
-                    raise ValueError(
-                        f"Column '{column_name}' "
-                        f"contains a value above "
-                        f"maximum {maximum}."
-                    )
-
-        # -----------------------------
-        # allowed_values validation
-        # -----------------------------
-
-        allowed_values = column_definition.get(
-            "allowed_values"
+        numeric_values = pd.to_numeric(
+            df[column_name],
+            errors="raise",
         )
 
-        if allowed_values is not None:
+    except Exception as error:
 
-            actual_values = set(
-                df[column_name]
-                .dropna()
-                .astype(str)
-                .unique()
+        raise ValueError(
+            f"Column '{column_name}' "
+            "contains a non-numeric value."
+        ) from error
+
+    minimum = column_definition.get(
+        "minimum"
+    )
+
+    maximum = column_definition.get(
+        "maximum"
+    )
+
+    if minimum is not None:
+
+        if (
+            numeric_values < minimum
+        ).any():
+
+            raise ValueError(
+                f"Column '{column_name}' "
+                f"contains a value below "
+                f"minimum {minimum}."
             )
 
-            invalid_values = (
-                actual_values
-                - set(allowed_values)
+    if maximum is not None:
+
+        if (
+            numeric_values > maximum
+        ).any():
+
+            raise ValueError(
+                f"Column '{column_name}' "
+                f"contains a value above "
+                f"maximum {maximum}."
             )
 
-            if invalid_values:
 
-                raise ValueError(
-                    f"Column '{column_name}' "
-                    f"contains invalid values: "
-                    f"{sorted(invalid_values)}"
-                )
+def check_allowed_values(df, column_definition):
+    """Only the values listed in allowed_values may appear."""
 
-    # -----------------------------------------------------
-    # 4. Composite primary key validation
-    # -----------------------------------------------------
+    column_name = column_definition["name"]
+
+    allowed_values = column_definition.get(
+        "allowed_values"
+    )
+
+    if allowed_values is not None:
+
+        actual_values = set(
+            df[column_name]
+            .dropna()
+            .astype(str)
+            .unique()
+        )
+
+        invalid_values = (
+            actual_values
+            - set(allowed_values)
+        )
+
+        if invalid_values:
+
+            raise ValueError(
+                f"Column '{column_name}' "
+                f"contains invalid values: "
+                f"{sorted(invalid_values)}"
+            )
+
+
+def check_column_values(df, column_definition):
+    """Type check first, then the allowed-values check, for one column."""
+
+    column_type = column_definition.get(
+        "type"
+    )
+
+    if column_type == "timestamp":
+
+        check_timestamp_column(
+            df,
+            column_definition["name"],
+        )
+
+    elif column_type == "float":
+
+        check_float_column(
+            df,
+            column_definition,
+        )
+
+    check_allowed_values(
+        df,
+        column_definition,
+    )
+
+
+def check_primary_key(df, schema):
+    """The composite primary key must be complete and unique."""
 
     primary_key = schema["primary_key"]
 
@@ -325,6 +316,37 @@ def validate_schema():
             f"Duplicate rows: {duplicate_count}"
         )
 
+
+def validate_schema():
+    """
+    Validate customer_care_emails.csv
+    against schema.yaml.
+
+    Checks (one small function each, in this order):
+    - columns
+    - nullable rules
+    - timestamp format, numeric range and allowed values per column
+    - composite primary key uniqueness
+    """
+
+    df = pd.read_csv(CSV_PATH)
+
+    with open(
+        SCHEMA_PATH,
+        "r",
+        encoding="utf-8",
+    ) as file:
+        schema = yaml.safe_load(file)
+
+    check_columns(df, schema)
+
+    check_nulls(df, schema)
+
+    for column_definition in schema["columns"]:
+        check_column_values(df, column_definition)
+
+    check_primary_key(df, schema)
+
     logger.info(
         "Schema validation passed."
     )
@@ -346,37 +368,25 @@ def validate_schema():
 # Task 3: transform
 # =========================================================
 
-def transform():
-    """
-    Clean and transform the CSV.
+TEXT_COLUMNS = [
+    "subject",
+    "sender",
+    "receiver",
+    "message_body",
+    "thread_id",
+    "email_types",
+    "email_status",
+    "email_criticality",
+    "product_types",
+    "agent_effectivity",
+    "agent_efficiency",
+]
 
-    Transformations:
-    - strip whitespace from text
-    - convert timestamp to UTC
-    - convert customer_satisfaction to numeric
-    """
 
-    df = pd.read_csv(CSV_PATH)
+def clean_text_columns(df):
+    """Strip leading and trailing spaces from every text column."""
 
-    # -----------------------------------------------------
-    # Clean text columns
-    # -----------------------------------------------------
-
-    text_columns = [
-        "subject",
-        "sender",
-        "receiver",
-        "message_body",
-        "thread_id",
-        "email_types",
-        "email_status",
-        "email_criticality",
-        "product_types",
-        "agent_effectivity",
-        "agent_efficiency",
-    ]
-
-    for column in text_columns:
+    for column in TEXT_COLUMNS:
 
         df[column] = (
             df[column]
@@ -384,9 +394,11 @@ def transform():
             .str.strip()
         )
 
-    # -----------------------------------------------------
-    # Timestamp -> UTC
-    # -----------------------------------------------------
+    return df
+
+
+def convert_timestamps_to_utc(df):
+    """Write every timestamp as one UTC format (ISO 8601, with Z)."""
 
     df["timestamp"] = pd.to_datetime(
         df["timestamp"],
@@ -402,9 +414,24 @@ def transform():
         )
     )
 
-    # -----------------------------------------------------
-    # customer_satisfaction -> numeric
-    # -----------------------------------------------------
+    return df
+
+
+def transform():
+    """
+    Clean and transform the CSV.
+
+    Transformations:
+    - strip whitespace from text
+    - convert timestamp to UTC
+    - convert customer_satisfaction to numeric
+    """
+
+    df = pd.read_csv(CSV_PATH)
+
+    df = clean_text_columns(df)
+
+    df = convert_timestamps_to_utc(df)
 
     df["customer_satisfaction"] = (
         pd.to_numeric(
@@ -412,10 +439,6 @@ def transform():
             errors="raise",
         )
     )
-
-    # -----------------------------------------------------
-    # Save cleaned CSV
-    # -----------------------------------------------------
 
     df.to_csv(
         TRANSFORMED_CSV_PATH,
@@ -441,6 +464,106 @@ def transform():
 # Task 4: load_to_postgres
 # =========================================================
 
+LOAD_COLUMNS = [
+    "subject",
+    "sender",
+    "receiver",
+    "timestamp",
+    "message_body",
+    "thread_id",
+    "email_types",
+    "email_status",
+    "email_criticality",
+    "product_types",
+    "agent_effectivity",
+    "agent_efficiency",
+    "customer_satisfaction",
+]
+
+
+def read_transformed_csv():
+    """Read the cleaned CSV and turn timestamps back into datetimes for PostgreSQL."""
+
+    df = pd.read_csv(
+        TRANSFORMED_CSV_PATH
+    )
+
+    if df.empty:
+
+        raise ValueError(
+            "Transformed CSV is empty."
+        )
+
+    df["timestamp"] = pd.to_datetime(
+        df["timestamp"],
+        utc=True,
+        errors="raise",
+    )
+
+    return df
+
+
+def dataframe_to_rows(df):
+    """Convert DataFrame rows to plain Python tuples (pandas Timestamp -> datetime)."""
+
+    timestamp_position = LOAD_COLUMNS.index(
+        "timestamp"
+    )
+
+    rows = []
+
+    for row in df[
+        LOAD_COLUMNS
+    ].itertuples(
+        index=False,
+        name=None,
+    ):
+
+        converted_row = list(row)
+
+        converted_row[timestamp_position] = (
+            converted_row[timestamp_position]
+            .to_pydatetime()
+        )
+
+        rows.append(
+            tuple(converted_row)
+        )
+
+    return rows
+
+
+def reload_table(rows):
+    """Create the table if needed, empty it, then insert the rows."""
+
+    hook = PostgresHook(
+        postgres_conn_id=POSTGRES_CONN_ID
+    )
+
+    with open(
+        DDL_PATH,
+        "r",
+        encoding="utf-8",
+    ) as file:
+
+        ddl_sql = file.read()
+
+    hook.run(
+        ddl_sql
+    )
+
+    hook.run(
+        f'TRUNCATE TABLE "{TARGET_TABLE}";'
+    )
+
+    hook.insert_rows(
+        table=TARGET_TABLE,
+        rows=rows,
+        target_fields=LOAD_COLUMNS,
+        commit_every=500,
+    )
+
+
 def load_to_postgres():
     """
     Load transformed CSV into PostgreSQL.
@@ -457,111 +580,11 @@ def load_to_postgres():
     create duplicate rows.
     """
 
-    df = pd.read_csv(
-        TRANSFORMED_CSV_PATH
-    )
+    df = read_transformed_csv()
 
-    if df.empty:
+    rows = dataframe_to_rows(df)
 
-        raise ValueError(
-            "Transformed CSV is empty."
-        )
-
-    # Convert timestamp back to datetime
-    # before sending it to PostgreSQL.
-
-    df["timestamp"] = pd.to_datetime(
-        df["timestamp"],
-        utc=True,
-        errors="raise",
-    )
-
-    columns = [
-        "subject",
-        "sender",
-        "receiver",
-        "timestamp",
-        "message_body",
-        "thread_id",
-        "email_types",
-        "email_status",
-        "email_criticality",
-        "product_types",
-        "agent_effectivity",
-        "agent_efficiency",
-        "customer_satisfaction",
-    ]
-
-    # -----------------------------------------------------
-    # Convert DataFrame rows to Python tuples
-    # -----------------------------------------------------
-
-    rows = []
-
-    for row in df[
-        columns
-    ].itertuples(
-        index=False,
-        name=None,
-    ):
-
-        converted_row = list(row)
-
-        # pandas Timestamp
-        # ->
-        # Python datetime
-
-        converted_row[3] = (
-            converted_row[3]
-            .to_pydatetime()
-        )
-
-        rows.append(
-            tuple(converted_row)
-        )
-
-    # -----------------------------------------------------
-    # Connect to target PostgreSQL
-    # -----------------------------------------------------
-
-    hook = PostgresHook(
-        postgres_conn_id=POSTGRES_CONN_ID
-    )
-
-    # -----------------------------------------------------
-    # Run ddl.sql
-    # -----------------------------------------------------
-
-    with open(
-        DDL_PATH,
-        "r",
-        encoding="utf-8",
-    ) as file:
-
-        ddl_sql = file.read()
-
-    hook.run(
-        ddl_sql
-    )
-
-    # -----------------------------------------------------
-    # Remove previous data
-    # -----------------------------------------------------
-
-    hook.run(
-        f'TRUNCATE TABLE "{TARGET_TABLE}";'
-    )
-
-    # -----------------------------------------------------
-    # Insert cleaned rows
-    # -----------------------------------------------------
-
-    hook.insert_rows(
-        table=TARGET_TABLE,
-        rows=rows,
-        target_fields=columns,
-        commit_every=500,
-    )
+    reload_table(rows)
 
     logger.info(
         "Successfully loaded %s rows "

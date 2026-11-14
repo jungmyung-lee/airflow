@@ -16,6 +16,7 @@ MINIO_SECRET_KEY, MINIO_BUCKET).
 from __future__ import annotations
 
 import io
+import logging
 import os
 from datetime import datetime
 from pathlib import Path
@@ -23,6 +24,8 @@ from pathlib import Path
 from airflow.exceptions import AirflowFailException
 from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import DAG
+
+logger = logging.getLogger(__name__)
 
 DATASET = "customer_care_emails"
 PARTITION_COL = "email_date"
@@ -185,7 +188,7 @@ def validate_contract_task():
     if problems:
         shown = "\n - ".join(problems[:MAX_REPORTED])
         raise AirflowFailException(f"Schema contract violated for {CSV_PATH}:\n - {shown}")
-    print(f"Contract OK: {len(df)} rows, {len(df.columns)} columns")
+    logger.info("Contract OK: %s rows, %s columns", len(df), len(df.columns))
 
 
 def transform_task(run_id: str) -> str:
@@ -195,7 +198,7 @@ def transform_task(run_id: str) -> str:
     STAGING_DIR.mkdir(parents=True, exist_ok=True)
     path = STAGING_DIR / f"{DATASET}_{run_id.replace(':', '_').replace('+', '_')}.parquet"
     out.to_parquet(path, index=False)
-    print(f"Staged {len(out)} rows -> {path}")
+    logger.info("Staged %s rows -> %s", len(out), path)
     return str(path)  # small string via XCom, not the data itself
 
 
@@ -230,7 +233,7 @@ def write_parquet_to_minio_task(ti):
     parts = build_partitions(df)
     for key, payload in parts:
         s3.put_object(Bucket=bucket, Key=key, Body=payload)
-    print(f"Wrote {len(parts)} partition file(s) to s3://{bucket}/{DATASET}/")
+    logger.info("Wrote %s partition file(s) to s3://%s/%s/", len(parts), bucket, DATASET)
 
 
 def data_quality_check_task():
