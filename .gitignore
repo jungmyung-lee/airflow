@@ -3,3 +3,10 @@ __pycache__/
 *.pyc
 .env
 
+
+.venv/
+.pytest_cache/
+.DS_Store
+logs/
+config/
+stage1/customer_care_emails/customer_care_emails_cleaned.csv
